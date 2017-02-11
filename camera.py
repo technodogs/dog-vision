@@ -17,6 +17,9 @@ class CameraManager:
   __webcam_name = None
   __calc = None
 
+  __pegTape1 = None
+  __pegTape2 = None
+
   # if local development, turn on debug to show frames in a window
   __debug = True
 
@@ -73,33 +76,77 @@ class CameraManager:
   def calculate(self, contours):
     ratios = []
     distances = []
+    centerY = []
     centerX = []
+    heights = []
+    self.__pegTape1 = None
+    self.__pegTape2 = None
+    i = 0
     for c in contours:
+      i = i + 1
       x, y, w, h = cv2.boundingRect(c)
-      centerX.append( round( x + w / 2, 0) )
+      cy = round( y + h / 2, 0)
+      cx = round( x + w / 2, 0)
+      centerY.append( cy )
+      centerX.append( cx )
       ratios.append( round( (float)(w) / h, 2) )
+      heights.append( h )      
+
 
       # distance calc varies by target
       if self.__calc == "peg":
         distances.append(self.calculateGearPeg(h))
+        if 0.3 < (w / h) < 0.6:
+          j = 0
+          for c2 in contours:
+            j = j + 1
+            x2, y2, w2, h2 = cv2.boundingRect(c2)
+            cy2 = round( y2 + h2 / 2, 0)
+            cx2 = round( x2 + w2 / 2, 0)
+            y_match = False
+            x_match = False
+            if i == j:
+              continue
+            if (cy + 10) > cy2 > (cy - 10):
+              y_match = True
+            #print(str(((h * 1.6) + cx - 30)) + " " + str(cx2) + " " + str(((h * 1.6) + cx + 30)))
+            if ((h * 1.6) + cx - 30) < cx2 < ((h * 1.6) + cx + 30):
+              x_match = True
+
+            if x_match and y_match:
+              self.__pegTape1 = c
+              self.__pegTape2 = c2
       elif self.__calc == "boiler":
         distances.append(self.calculateBoiler(w))
     
     #write calculations to networktables
-    self.writeNetworkTables(ratios, distances, centerX)
+    self.writeNetworkTables(ratios, distances, centerY, centerX, heights)
+
+    # check 1: number of contours should be 2
+    # check 2: ratios of both should be between .3 and .6
+    # check 3: both contours should be around the same Y (10 pixel + or -)
+    # check 4: distance between the contours should be 8 inches (calculate via pixel)
 
   def calculateGearPeg(self, h):
-    return round( ((5 * 480) / (2 * h * math.tan(60) )), 0)
+    #print(str(math.atan((5*480)/(h*69))))
+    return round( ((5 * 480) / (2 * h * math.tan(50) )), 0) * -1
 
   def calculateBoiler(self, w):
     return round( ((11.5 * 640) / (2 * w * math.tan(60) )), 0)
 
-  def writeNetworkTables(self, ratios, distances, centerX):
+  def writeNetworkTables(self, ratios, distances, centerY, centerX, heights):
     table = NetworkTable.getTable("DogVision")
     sub = table.getSubTable(self.__calc)
     sub.putNumberArray("ratios", ratios)
     sub.putNumberArray("distances", distances)
+    sub.putNumberArray("centerY", centerY)
     sub.putNumberArray("centerX", centerX)
+    sub.putNumberArray("heights", heights)
+    if not self.__pegTape1 == None:
+      sub.putBoolean("lock", True)
+    else:
+      sub.putBoolean("lock", False)
+
 
   def connected(self):
     return self.__camera_good
